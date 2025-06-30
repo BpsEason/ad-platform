@@ -145,38 +145,72 @@ AdStackX 是一個專為廣告管理打造的多租戶平台，使用 **Laravel*
 以下是 AdStackX 的系統架構圖，使用中文標籤並優化 Mermaid 格式以確保渲染正確。
 
 ```mermaid
-graph TD
-    A[用戶瀏覽器] -->|HTTP/HTTPS| B[Traefik 反向代理]
-    B -->|frontend.localhost| C[Vue 3 前端]
-    B -->|ad-api.localhost| D[Laravel 後端]
-    B -->|recommender.localhost| E[FastAPI 推薦引擎]
-    D --> F[MySQL 資料庫]
-    D --> G[Redis 快取]
-    D --> H[Kafka 事件流]
-    E --> H
-    E --> G
-    E --> F
-    H --> I[Zookeeper]
-    J[Prometheus 監控] --> B
-    J --> D
-    J --> E
-    K[Grafana 儀表板] --> J
-    subgraph Docker 網絡
-        B --> C
-        B --> D
-        B --> E
-        D --> F
-        D --> G
-        D --> H
-        E --> H
-        E --> G
-        E --> F
-        H --> I
-        J --> B
-        J --> D
-        J --> E
-        K --> J
-    end
+flowchart TD
+  subgraph Tenant A & B
+    TenantA([Tenant A])
+    TenantB([Tenant B])
+  end
+
+  TenantA --> Laravel
+  TenantB --> Laravel
+
+  subgraph Laravel Backend
+    Laravel[Laravel App]
+    Auth[使用者登入/註冊]
+    RBAC[RBAC 權限控管 (Spatie)]
+    Ads[廣告設定 CRUD + 排程]
+    Reports[報表模組 (CTR/CVR API)]
+    APIs[RESTful API + Swagger Docs]
+    Laravel --> Auth
+    Laravel --> RBAC
+    Laravel --> Ads
+    Laravel --> Reports
+    Laravel --> APIs
+  end
+
+  Laravel -->|user_id, ad_id, event_type| FastAPI
+
+  subgraph FastAPI Recommender
+    FastAPI[FastAPI 推薦服務]
+    CF[協同過濾推薦引擎]
+    Kafka[Kafka 傳送事件流]
+    Redis[Redis 寫入備援佇列]
+    FastAPI --> CF
+    FastAPI --> Kafka
+    FastAPI --> Redis
+  end
+
+  Laravel <-->|推薦結果 API| FastAPI
+
+  Reports --> Dashboard[📊 Vue.js 儀表板 (Chart.js & ECharts)]
+  Dashboard -->|Token 認證 + X-Tenant-ID| Laravel
+
+  subgraph Database & Infra
+    MySQL[(MySQL 資料庫)]
+    Redis[(Redis 快取)]
+    Kafka[(Kafka 事件流)]
+    MySQL <-- Laravel
+    MySQL <-- FastAPI
+    Redis <-- FastAPI
+    Kafka <-- FastAPI
+  end
+
+  subgraph DevOps
+    Traefik[Traefik 反向代理]
+    Docker[Docker Compose]
+    CI[GitHub Actions (CI/CD)]
+    Traefik --> Laravel
+    Traefik --> FastAPI
+    Traefik --> Dashboard
+    Docker --> Laravel
+    Docker --> FastAPI
+    Docker --> Dashboard
+    CI --> Docker
+  end
+
+  classDef highlight fill:#fdf6e3,stroke:#268bd2,stroke-width:2px;
+  class Laravel,FastAPI,Dashboard highlight;
+
 ```
 
 **說明**：
