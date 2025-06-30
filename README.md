@@ -188,10 +188,10 @@ graph TD
     MySQL[MySQL 資料庫]
     RedisDB[Redis 快取]
     KafkaDB[Kafka 事件流]
-    MySQL <-- Laravel
-    MySQL <-- FastAPI
-    RedisDB <-- FastAPI
-    KafkaDB <-- FastAPI
+    Laravel --> MySQL
+    FastAPI --> MySQL
+    FastAPI --> RedisDB
+    FastAPI --> KafkaDB
   end
 
   subgraph DevOps
@@ -207,8 +207,8 @@ graph TD
     CI --> Docker
   end
 
-  classDef highlight fill:#fdf6e3,stroke:#268bd2,stroke-width:2px;
-  class Laravel,FastAPI,Dashboard highlight;
+  classDef highlight fill:#fdf6e3,stroke:#268bd2,stroke-width:2px
+  class Laravel,FastAPI,Dashboard highlight
 
 ```
 
