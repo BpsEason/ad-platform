@@ -1,5 +1,3 @@
-```
-# README.md
 # AdStackX - 模組化廣告平台
 
 AdStackX 是一個模組化的廣告平台，支援多租戶、個人化推薦和即時數據分析。整合 Laravel 後端、FastAPI 推薦系統和 Vue 3 前端，採用 Docker、Traefik、Kafka、Prometheus 和 Grafana 確保高可用性和監控。
@@ -509,4 +507,3 @@ test('renders ad list', () => {
   render(App);
   expect(screen.getByText(/廣告列表/i)).toBeInTheDocument();
 });
-```
