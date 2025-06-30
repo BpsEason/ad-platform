@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+redis
+kafka-python
+pytest
+pytest-asyncio
+sqlalchemy
+pymysql # Or mysqlclient for C-based MySQL connector

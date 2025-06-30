@@ -1,0 +1,30 @@
+# docker/prometheus/prometheus.yml
+global:
+  scrape_interval: 15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. Default is every 1 minute.
+
+# A scrape configuration scraping Traefik itself
+scrape_configs:
+  - job_name: 'traefik'
+    # metrics_path defaults to /metrics
+    # scheme defaults to http
+    static_configs:
+      - targets: ['traefik:8081'] # Point to Traefik's metrics entrypoint
+    # For more advanced setup, use Consul or Kubernetes service discovery.
+
+  - job_name: 'cadvisor' # Monitor Docker containers' resource usage
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # Add other services here if they expose Prometheus metrics
+  # For Laravel, you might use a package like 'spatie/laravel-ignition' or implement custom metrics.
+  # Example for Laravel (if it exposes metrics on /metrics endpoint):
+  # - job_name: 'laravel_app'
+  #   static_configs:
+  #     - targets: ['laravel:80'] # Assuming Laravel metrics are on port 80 at /metrics
+
+  # For FastAPI, you can use 'prometheus_fastapi_instrumentator' to expose metrics.
+  # Example for FastAPI (if it exposes metrics on /metrics endpoint):
+  # - job_name: 'fastapi_app'
+  #   static_configs:
+  #     - targets: ['fastapi:8001'] # Assuming FastAPI metrics are on port 8001 at /metrics

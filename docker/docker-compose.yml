@@ -1,0 +1,417 @@
+version: '3.8'
+
+services:
+  # Traefik Reverse Proxy
+  traefik:
+    image: traefik:v2.9
+    container_name: traefik
+    command:
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --providers.file.directory=/etc/traefik/dynamic_config
+      - --providers.file.watch=true
+      - --log.level=${TRAEFIK_LOG_LEVEL:-INFO}
+      - --metrics.prometheus=true # Enable Prometheus metrics
+      - --metrics.prometheus.entryPoint=metrics # Expose metrics on a dedicated entrypoint
+      ${TRAEFIK_HTTPS_CONFIG} # Placeholder for HTTPS config from .env
+    ports:
+      - "80:80"
+      - "8080:8080" # Traefik Dashboard
+      - "8081:8081" # Metrics Entrypoint (example for Prometheus)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/config:/etc/traefik/dynamic_config
+    networks:
+      - ad_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Laravel Backend Service
+  laravel:
+    build:
+      context: ../laravel
+      dockerfile: ./laravel/Dockerfile.laravel
+    container_name: laravel_backend
+    volumes:
+      - ../laravel:/var/www/html
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+      - APP_KEY=${APP_KEY}
+      - APP_URL=${APP_URL}
+      - SANCTUM_STATEFUL_DOMAINS=${SANCTUM_STATEFUL_DOMAINS}
+      - TRAEFIK_API_KEY=${TRAEFIK_API_KEY} # Pass API key for Traefik config endpoint
+    networks:
+      - ad_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.laravel.rule=Host(`ad-api.localhost`)"
+      - "traefik.http.services.laravel.loadbalancer.server.port=80"
+      - "traefik.http.routers.laravel.entrypoints=web,websecure" # Enable both HTTP and HTTPS
+      - "traefik.http.routers.laravel.tls=${TRAEFIK_HTTPS_ENABLED}" # Enable TLS based on env var
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # FastAPI Recommender Service
+  fastapi:
+    build:
+      context: ../fastapi
+      dockerfile: ./fastapi/Dockerfile.fastapi
+    container_name: fastapi_recommender
+    volumes:
+      - ../fastapi:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka1: # Depend on at least one kafka broker
+        condition: service_healthy
+      db: # FastAPI also connects to DB
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - KAFKA_BROKER=${KAFKA_BROKER} # Use env var for brokers
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+    networks:
+      - ad_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.fastapi.rule=Host(`recommender.localhost`)"
+      - "traefik.http.services.fastapi.loadbalancer.server.port=8001"
+      - "traefik.http.routers.fastapi.entrypoints=web,websecure" # Enable both HTTP and HTTPS
+      - "traefik.http.routers.fastapi.tls=${TRAEFIK_HTTPS_ENABLED}" # Enable TLS based on env var
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+  
+  # Frontend Vue 3 Application
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ./frontend/Dockerfile.frontend
+    container_name: adstackx_frontend
+    volumes:
+      - ../frontend:/app
+    networks:
+      - ad_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`frontend.localhost`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+      - "traefik.http.routers.frontend.entrypoints=web,websecure" # Enable both HTTP and HTTPS
+      - "traefik.http.routers.frontend.tls=${TRAEFIK_HTTPS_ENABLED}" # Enable TLS based on env var
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:80"] # Frontend listens internally on 80 (via Node.js server.js)
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # MySQL Database
+  db:
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - MYSQL_DATABASE=${DB_DATABASE}
+      - MYSQL_USER=${DB_USERNAME}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+    volumes:
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - db_data:/var/lib/mysql
+    networks:
+      - ad_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${DB_USERNAME}", "-p${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:6.2-alpine
+    container_name: redis_cache
+    networks:
+      - ad_network
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Zookeeper Cluster (3 nodes for High Availability)
+  zookeeper1:
+    image: bitnami/zookeeper:3.8.3
+    container_name: zookeeper1
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - ZOO_MY_ID=1
+      - ZOO_SERVERS=zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
+    volumes:
+      - zookeeper1_data:/bitnami/zookeeper
+    networks:
+      - ad_network
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  zookeeper2:
+    image: bitnami/zookeeper:3.8.3
+    container_name: zookeeper2
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - ZOO_MY_ID=2
+      - ZOO_SERVERS=zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
+    volumes:
+      - zookeeper2_data:/bitnami/zookeeper
+    networks:
+      - ad_network
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  zookeeper3:
+    image: bitnami/zookeeper:3.8.3
+    container_name: zookeeper3
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - ZOO_MY_ID=3
+      - ZOO_SERVERS=zookeeper1:2888:3888;zookeeper2:2888:3888;zookeeper3:2888:3888
+    volumes:
+      - zookeeper3_data:/bitnami/zookeeper
+    networks:
+      - ad_network
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Kafka Cluster (3 brokers for High Availability)
+  kafka1:
+    image: bitnami/kafka:3.5.1
+    container_name: kafka1
+    depends_on:
+      zookeeper1:
+        condition: service_healthy
+      zookeeper2:
+        condition: service_healthy
+      zookeeper3:
+        condition: service_healthy
+    environment:
+      - KAFKA_CFG_BROKER_ID=1
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,EXTERNAL://:9094
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka1:9092,EXTERNAL://localhost:9094 # Change localhost to actual external IP/FQDN in prod
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper1:2181,zookeeper2:2181,zookeeper3:2181
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_NUM_PARTITIONS=3 # Example: 3 partitions
+      - KAFKA_CFG_DEFAULT_REPLICATION_FACTOR=2 # Example: 2 replicas for high availability
+      - KAFKA_CFG_MIN_INSYNC_REPLICAS=2 # Ensure data consistency
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    ports:
+      - "9094:9094" # Expose only one Kafka port for external connection
+    volumes:
+      - kafka1_data:/bitnami/kafka
+    networks:
+      - ad_network
+    healthcheck:
+      test: ["CMD", "sh", "-c", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  kafka2:
+    image: bitnami/kafka:3.5.1
+    container_name: kafka2
+    depends_on:
+      zookeeper1:
+        condition: service_healthy
+      zookeeper2:
+        condition: service_healthy
+      zookeeper3:
+        condition: service_healthy
+    environment:
+      - KAFKA_CFG_BROKER_ID=2
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka2:9092
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper1:2181,zookeeper2:2181,zookeeper3:2181
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_NUM_PARTITIONS=3
+      - KAFKA_CFG_DEFAULT_REPLICATION_FACTOR=2
+      - KAFKA_CFG_MIN_INSYNC_REPLICAS=2 # Ensure data consistency
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    volumes:
+      - kafka2_data:/bitnami/kafka
+    networks:
+      - ad_network
+    healthcheck:
+      test: ["CMD", "sh", "-c", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  kafka3:
+    image: bitnami/kafka:3.5.1
+    container_name: kafka3
+    depends_on:
+      zookeeper1:
+        condition: service_healthy
+      zookeeper2:
+        condition: service_healthy
+      zookeeper3:
+        condition: service_healthy
+    environment:
+      - KAFKA_CFG_BROKER_ID=3
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka3:9092
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper1:2181,zookeeper2:2181,zookeeper3:2181
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_NUM_PARTITIONS=3
+      - KAFKA_CFG_DEFAULT_REPLICATION_FACTOR=2
+      - KAFKA_CFG_MIN_INSYNC_REPLICAS=2 # Ensure data consistency
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    volumes:
+      - kafka3_data:/bitnami/kafka
+    networks:
+      - ad_network
+    healthcheck:
+      test: ["CMD", "sh", "-c", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command: --config.file=/etc/prometheus/prometheus.yml --web.enable-remote-write-receiver
+    ports:
+      - "9090:9090"
+    networks:
+      - ad_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning # Enable provisioning
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning # Mount provisioning configs
+    networks:
+      - ad_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+  
+  # cAdvisor for Docker container metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0 # Latest available
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - ad_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+# Docker Networks
+networks:
+  ad_network:
+    driver: bridge
+
+# Docker Volumes
+volumes:
+  db_data:
+    driver: local
+  redis_data:
+    driver: local
+  zookeeper1_data:
+    driver: local
+  zookeeper2_data:
+    driver: local
+  zookeeper3_data:
+    driver: local
+  kafka1_data:
+    driver: local
+  kafka2_data:
+    driver: local
+  kafka3_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

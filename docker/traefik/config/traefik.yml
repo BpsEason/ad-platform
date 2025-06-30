@@ -1,0 +1,39 @@
+# Traefik 的靜態配置
+
+api:
+  dashboard: true
+  insecure: true # 在本地開發環境中啟用儀表板，無需身份驗證
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+  metrics: # New entrypoint for Prometheus metrics
+    address: ":8081"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false # 只暴露標籤為 traefik.enable=true 的容器
+  
+  file:
+    directory: /etc/traefik/dynamic_config
+    watch: true
+    pollInterval: 10s
+
+# Cert Resolvers for HTTPS (if TRAEFIK_HTTPS_ENABLED is true in .env)
+# Uncomment and configure this section if you set TRAEFIK_HTTPS_ENABLED=true in .env
+# Example using Let's Encrypt with TLS Challenge (for staging/production)
+# certificatesResolvers:
+#   myresolver:
+#     acme:
+#       email: "your-email@example.com" # CHANGE THIS EMAIL
+#       storage: "/letsencrypt/acme.json" # Persistent storage for certificates
+#       tlsChallenge: {} # Enable TLS-ALPN-01 challenge
+
+# For development with self-signed certs (less secure, but easier for local testing)
+# You might need to generate your own certs and mount them, or use a tool like mkcert.
+# This setup assumes Traefik handles TLS termination and re-encrypts to backend if needed.
+# If you enable TLS here, ensure your Docker Compose labels use `entrypoints=websecure`
+# and `traefik.http.routers.<name>.tls=true`.

@@ -1,0 +1,46 @@
+FROM php:8.1-fpm-alpine
+
+# Install system dependencies
+RUN apk add --no-cache \
+    nginx \
+    mysql-client \
+    git \
+    unzip \
+    libzip-dev \
+    supervisor \
+    openssl \
+    curl \
+    bash \
+    && rm -rf /var/cache/apk/*
+
+# Install PHP extensions
+RUN docker-php-ext-install pdo_mysql zip opcache
+RUN docker-php-ext-enable opcache
+
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www/html
+
+# Copy composer files first to leverage Docker cache
+# Specify exact versions or use ranges for production composer.json
+COPY ../laravel/composer.json ../laravel/composer.lock ./
+RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader \
+    # Install specific versions of core Laravel dependencies for stability if not in composer.json
+    && composer require laravel/sanctum:^3.0 spatie/laravel-permission:^5.0 darkaonline/l5-swagger:^8.0 --no-update
+
+# Copy the rest of the application code
+COPY ../laravel ./
+
+# Copy Nginx config from the common Nginx directory
+COPY ../nginx/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy the Laravel entrypoint script
+COPY ./laravel/entrypoint.sh /usr/local/bin/laravel-entrypoint.sh
+RUN chmod +x /usr/local/bin/laravel-entrypoint.sh
+
+EXPOSE 80
+
+# Use the custom entrypoint script
+ENTRYPOINT ["/usr/local/bin/laravel-entrypoint.sh"]
+CMD ["php-fpm", "-D", "&&", "nginx", "-g", "daemon off;"]
