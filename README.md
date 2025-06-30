@@ -149,17 +149,18 @@ graph TD
   subgraph 租戶
     TenantA[租戶 A]
     TenantB[租戶 B]
-    TenantA --> Laravel
-    TenantB --> Laravel
   end
+
+  TenantA -->|API 請求| Laravel
+  TenantB -->|API 請求| Laravel
 
   subgraph Laravel 後端
     Laravel[Laravel 應用]
-    Auth[使用者認證]
-    RBAC[RBAC 權限]
+    Auth[認證]
+    RBAC[權限控制]
     Ads[廣告管理]
-    Reports[報表模組]
-    APIs[RESTful API]
+    Reports[報表]
+    APIs[API]
     Laravel --> Auth
     Laravel --> RBAC
     Laravel --> Ads
@@ -167,17 +168,17 @@ graph TD
     Laravel --> APIs
   end
 
-  Laravel -->|事件數據| FastAPI
-  Laravel <-->|推薦 API| FastAPI
+  Laravel -->|事件| FastAPI
+  Laravel <-->|推薦| FastAPI
 
   subgraph FastAPI 推薦
-    FastAPI[FastAPI 引擎]
+    FastAPI[FastAPI]
     CF[推薦邏輯]
     FastAPI --> CF
   end
 
   Reports --> Dashboard[Vue.js 儀表板]
-  Dashboard -->|Token 與 X-Tenant-ID| Laravel
+  Dashboard -->|Token 與 Tenant-ID| Laravel
 
   subgraph 基礎設施
     MySQL[MySQL]
@@ -190,7 +191,7 @@ graph TD
   end
 
   subgraph DevOps
-    Traefik[Traefik 代理]
+    Traefik[Traefik]
     Docker[Docker]
     CI[CI/CD]
     Traefik --> Laravel
