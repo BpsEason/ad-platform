@@ -145,22 +145,22 @@ AdStackX 是一個專為廣告管理打造的多租戶平台，使用 **Laravel*
 以下是 AdStackX 的系統架構圖，使用中文標籤並優化 Mermaid 格式以確保渲染正確。
 
 ```mermaid
-flowchart TD
-  subgraph Tenant A & B
-    TenantA([Tenant A])
-    TenantB([Tenant B])
+graph TD
+  subgraph 租戶
+    TenantA[租戶 A]
+    TenantB[租戶 B]
   end
 
   TenantA --> Laravel
   TenantB --> Laravel
 
-  subgraph Laravel Backend
-    Laravel[Laravel App]
-    Auth[使用者登入/註冊]
-    RBAC[RBAC 權限控管 (Spatie)]
-    Ads[廣告設定 CRUD + 排程]
-    Reports[報表模組 (CTR/CVR API)]
-    APIs[RESTful API + Swagger Docs]
+  subgraph Laravel 後端
+    Laravel[Laravel 應用]
+    Auth[使用者登入與註冊]
+    RBAC[RBAC 權限控制 Spatie]
+    Ads[廣告設定 CRUD 與排程]
+    Reports[報表模組 CTR/CVR API]
+    APIs[RESTful API 與 Swagger 文檔]
     Laravel --> Auth
     Laravel --> RBAC
     Laravel --> Ads
@@ -169,36 +169,35 @@ flowchart TD
   end
 
   Laravel -->|user_id, ad_id, event_type| FastAPI
+  Laravel <-->|推薦結果 API| FastAPI
 
-  subgraph FastAPI Recommender
-    FastAPI[FastAPI 推薦服務]
+  subgraph FastAPI 推薦服務
+    FastAPI[FastAPI 推薦引擎]
     CF[協同過濾推薦引擎]
-    Kafka[Kafka 傳送事件流]
-    Redis[Redis 寫入備援佇列]
+    Kafka[Kafka 事件流]
+    Redis[Redis 備援佇列]
     FastAPI --> CF
     FastAPI --> Kafka
     FastAPI --> Redis
   end
 
-  Laravel <-->|推薦結果 API| FastAPI
+  Reports --> Dashboard[Vue.js 儀表板 Chart.js 與 ECharts]
+  Dashboard -->|Token 認證與 X-Tenant-ID| Laravel
 
-  Reports --> Dashboard[📊 Vue.js 儀表板 (Chart.js & ECharts)]
-  Dashboard -->|Token 認證 + X-Tenant-ID| Laravel
-
-  subgraph Database & Infra
-    MySQL[(MySQL 資料庫)]
-    Redis[(Redis 快取)]
-    Kafka[(Kafka 事件流)]
+  subgraph 資料庫與基礎設施
+    MySQL[MySQL 資料庫]
+    RedisDB[Redis 快取]
+    KafkaDB[Kafka 事件流]
     MySQL <-- Laravel
     MySQL <-- FastAPI
-    Redis <-- FastAPI
-    Kafka <-- FastAPI
+    RedisDB <-- FastAPI
+    KafkaDB <-- FastAPI
   end
 
   subgraph DevOps
     Traefik[Traefik 反向代理]
     Docker[Docker Compose]
-    CI[GitHub Actions (CI/CD)]
+    CI[GitHub Actions CI/CD]
     Traefik --> Laravel
     Traefik --> FastAPI
     Traefik --> Dashboard
